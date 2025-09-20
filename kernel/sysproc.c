@@ -6,6 +6,8 @@
 #include "spinlock.h"
 #include "proc.h"
 
+#include "sysinfo.h"
+
 uint64
 sys_exit(void)
 {
@@ -99,4 +101,26 @@ sys_trace(void)
   argint(0, &mask);
   myproc()->tracemask = (uint64)mask;
   return 0;
+}
+
+uint64
+sys_info(void)
+{
+  struct sysinfo info;
+  uint64 uaddr; // user-space passed address
+
+  // get user-space passed address
+  argaddr(0, &uaddr);
+
+  // get kernel-space free memory
+  uint64 fmemory = kfmemory();
+  info.freemem = fmemory;
+  // get number of active processes
+  int active_proc = cprocnum();
+  info.nproc = active_proc;
+
+  // copy info to user-space
+  if(copyout(myproc()->pagetable, uaddr, (char*)&info, sizeof(info)) < 0)
+    return -1;
+  return 0; 
 }

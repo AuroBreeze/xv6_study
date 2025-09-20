@@ -80,3 +80,21 @@ kalloc(void)
     memset((char*)r, 5, PGSIZE); // fill with junk
   return (void*)r;
 }
+
+
+// return uint64 the sum of all the free memory
+uint64
+kfmemory(void)
+{
+  struct run *r;
+  uint64 sum = 0;
+
+  acquire(&kmem.lock);
+  for(r = kmem.freelist; r; r = r->next){
+    sum += PGSIZE;
+  }
+  release(&kmem.lock);
+
+  return sum;
+}
+

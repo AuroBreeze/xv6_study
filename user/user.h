@@ -41,3 +41,9 @@ int memcmp(const void *, const void *, uint);
 void *memcpy(void *, const void *, uint);
 
 void *trace(int);
+
+struct sysinfo{
+    uint64 freemem;
+    int nproc;
+};
+void info(struct sysinfo *);

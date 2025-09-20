@@ -171,6 +171,22 @@ freeproc(struct proc *p)
   p->state = UNUSED;
 }
 
+
+// collect the active processes
+// return uint32 number
+int
+cprocnum(void)
+{
+  struct proc *p;
+  int sum = 0;
+  for(p = proc; p < &proc[NPROC]; ++p){
+    if(p->state != UNUSED){
+      ++sum;
+    }
+  }
+  return sum;
+}
+
 // Create a user page table for a given process, with no user memory,
 // but with trampoline and trapframe pages.
 pagetable_t
