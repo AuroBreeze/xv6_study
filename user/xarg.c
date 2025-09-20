@@ -22,16 +22,16 @@ main(int argc, char *argv[])
     // 先把命令行参数拷贝进去 (跳过 xargs 本身)
     for(i = 1; i < argc; i++){
         xargv[i-1] = argv[i];
-        fprintf(2, "xargv: argv[%d] = %s\n", i-1, xargv[i-1]);
+        // fprintf(2, "xargv: argv[%d] = %s\n", i-1, xargv[i-1]);
     }
     int fixed = argc - 1; // 固定参数数量
 
     // 从 stdin 一点点读
     while((n = read(0, buf + m, sizeof(buf) - m - 1)) > 0){
-        fprintf(2, "xargv: read %d bytes\n", n);
+        // fprintf(2, "xargv: read %d bytes\n", n);
         m += n;
         buf[m] = 0;
-        fprintf(2, "xargv: buf = %s\n", buf);
+        // fprintf(2, "xargv: buf = %s\n", buf);
 
         char *p = buf;
         char *start = p;
@@ -42,11 +42,11 @@ main(int argc, char *argv[])
                     *p = 0;  // 切断 token
                     xargv[fixed] = start;
                     xargv[fixed+1] = 0;
-                    fprintf(2, "xargv[fixed]: argv[%d] = %s\n", fixed, xargv[fixed]);
-                    fprintf(2, "xargv[fixed+1]: argv[%d] = %s\n", fixed+1, xargv[fixed+1]);
+                    // fprintf(2, "xargv[fixed]: argv[%d] = %s\n", fixed, xargv[fixed]);
+                    // fprintf(2, "xargv[fixed+1]: argv[%d] = %s\n", fixed+1, xargv[fixed+1]);
                     if(fork() == 0){
-                        fprintf(2, "xargv: fork %s\n", xargv[0]);
-                        fprintf(2, "xargv: exec %s\n", xargv[1]);
+                        // fprintf(2, "xargv: fork %s\n", xargv[0]);
+                        // fprintf(2, "xargv: exec %s\n", xargv[1]);
                         exec(xargv[0], xargv);
                         fprintf(2, "xargv: exec %s failed\n", xargv[0]);
                         exit(1);

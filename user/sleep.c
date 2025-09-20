@@ -15,3 +15,5 @@ int main(int argc, char *argv[]){
     sleep(time);
     exit(0);
 }
+
+// make GRADEFLAGS=sleep grade
