@@ -2,7 +2,9 @@
 #include "kernel/stat.h"
 #include "user/user.h"
 
-int main(int argc, char *argv[]){
+int
+main(int argc, char *argv[])
+{
     if(argc != 1){
         fprintf(2, "Usage: pingpong\n");
         exit(1);
@@ -13,20 +15,37 @@ int main(int argc, char *argv[]){
     pipe(p2); // child -> parent
 
     int pid = fork();
+    if(pid < 0){
+        fprintf(2, "fork failed\n");
+        exit(1);
+    }
+
     if(pid == 0){
-        // 子进程
-        char buf[10];
-        read(p1[0], buf, 4);   // 从 parent 读 "ping"
-        fprintf(1, "%d: received %s\n", getpid(), buf);
-
-        write(p2[1], "pong", 4); // 回应 parent
-    }else{
-        // 父进程
-        write(p1[1], "ping", 4); // 发给 child
+        // ===== 子进程 =====
+        close(p1[1]); // 子进程不写 p1
+        close(p2[0]); // 子进程不读 p2
 
         char buf[10];
-        read(p2[0], buf, 4);   // 收到 "pong"
+        read(p1[0], buf, sizeof(buf));
         fprintf(1, "%d: received %s\n", getpid(), buf);
+
+        write(p2[1], "pong", 4);
+
+        close(p1[0]);
+        close(p2[1]);
+    } else {
+        // ===== 父进程 =====
+        close(p1[0]); // 父进程不读 p1
+        close(p2[1]); // 父进程不写 p2
+
+        write(p1[1], "ping", 4);
+
+        char buf[10];
+        read(p2[0], buf, sizeof(buf));
+        fprintf(1, "%d: received %s\n", getpid(), buf);
+
+        close(p1[1]);
+        close(p2[0]);
     }
 
     exit(0);
