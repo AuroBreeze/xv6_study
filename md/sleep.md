@@ -83,7 +83,7 @@ Look at Kernighan and Ritchie's book The C programming language (second edition)
 ```
 
 我们在这里需要知道的是，`RISC-V`的约定，是**寄存器 a7** 中保存系统调用号，所以在`kernel/syscall.c`中，有专门的函数的映射，也就是`syscalls[]`，另一个`RISC-V`的约定是，**寄存器 a0 - a5** 中保存系统调用的参数，也就是我们在`user/user.h`中的函数的参数
-，同时处理完的返回值也会保存在**寄存器 a0 - a7** 中。
+，同时处理完的返回值也会保存在**寄存器 a0** 中。
 
 也就是说，在`kernel/syscall.c`中的这句话`p->trapframe->a0 = syscalls[num]();`就是调用函数，并将返回值保存在**寄存器 a0** 中。
 
@@ -117,7 +117,7 @@ sys_sleep(void)
 
 其中，`acquire()`和`release()`用来获取**锁**和释放**锁**，用来保护共享资源。在这里我们先不深入探究。
 
-我们在`while`会发现还有一个`if`的判断语句dual，`if(killed(myproc()))`，这里的作用就是判断我们当前的进程是否被杀死，如果被杀死就将锁释放。
+我们在`while`会发现还有一个`if`的判断语句，`if(killed(myproc()))`，这里的作用就是判断我们当前的进程是否被杀死，如果被杀死就将锁释放。
 
 `myproc()`这个可以简单理解为**获取当前进程**。
 
