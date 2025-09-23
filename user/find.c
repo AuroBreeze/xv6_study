@@ -18,12 +18,12 @@ int find(char *path, char *name){
     struct stat st;
 
     if((fd = open(path, O_RDONLY)) < 0){
-        fprintf(2, "ls: cannot open %s\n", path);
+        fprintf(2, "find: cannot open %s\n", path);
         return -1;
     }
 
     if(fstat(fd, &st) < 0){
-        fprintf(2, "ls: cannot stat %s\n", path);
+        fprintf(2, "find: cannot stat %s\n", path);
         close(fd);
         return -1;
     }
