@@ -74,7 +74,34 @@ sys_sleep(void)
 int
 sys_pgaccess(void)
 {
-  // lab pgtbl: your code here.
+  uint64 uva;     // 起始虚拟地址 (用户传入)
+  int pgn;        // 页数
+  uint64 ubits;   // 存放结果的用户虚拟地址
+  uint32 mask = 0;
+
+  argaddr(0, &uva);
+  argint(1, &pgn);
+  argaddr(2, &ubits);
+
+  if(pgn <= 0 || pgn > 32)   // xv6 实验里一般要求最多 32 页
+    return -1;
+
+  struct proc *p = myproc();
+  for(int i = 0; i < pgn; i++){
+    pte_t *pte = walk(p->pagetable, uva + i*PGSIZE, 0);
+    if(pte == 0)
+      continue;
+
+    if(*pte & PTE_A){
+      mask |= (1 << i);
+      *pte &= ~PTE_A; // 清掉访问位
+    }
+  }
+
+  // 把 mask 拷贝回用户态
+  if(copyout(p->pagetable, ubits, (char *)&mask, sizeof(mask)) < 0)
+    return -1;
+
   return 0;
 }
 #endif
