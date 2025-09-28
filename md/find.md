@@ -22,6 +22,8 @@ Add the program to UPROGS in Makefile.
 
 ## user/ls.c 函数解析
 
+### user/ls.c ---> 0
+
 通过查看`user/ls.c`中的定义，`void ls(char *path)`，我们来看`user/ls.c`主函数的代码：
 
 ```c
@@ -193,4 +195,225 @@ sys_open(void)
   end_op();
 ```
 `begin_op()`和`end_op()`函数是别用于开始和结束一个磁盘操作(保证磁盘操作的**原子性**操作)。
+
+
+```c
+    if((ip = namei(path)) == 0){
+      end_op();
+      return -1;
+    }
+    ilock(ip);
+    if(ip->type == T_DIR && omode != O_RDONLY){
+      iunlockput(ip);
+      end_op();
+      return -1;
+    }
+```
+
+在下面`if`判断的`else`块中，我们调用了`namei()`函数，这个函数的功能是返回文件名对应的**inode**。
+
+`namei()`会解析传入的路径并进行寻找`inode`。
+
+随后通过
+
+```c
+  if((f = filealloc()) == 0 || (fd = fdalloc(f)) < 0){
+    if(f) 
+      fileclose(f);
+    iunlockput(ip);
+    end_op();
+    return -1;
+  }
+```
+
+我们将`file`结构体进行分配，并返回一个`file`文件描述符。
+
+代码的最后，将数据复制到`file`结构体中，并将`file`的文件描述符返回给用户。
+
+### user/ls.c ---> 1
+
+我们继续分析`ls.c`中的代码。
+
+```c
+    if(fstat(fd, &st) < 0){
+        fprintf(2, "find: cannot stat %s\n", path);
+        close(fd);
+        return -1;
+    }
+
+  // st 的结构体
+  struct stat {
+    int dev;     // File system's disk device
+    uint ino;    // Inode number
+    short type;  // Type of file
+    short nlink; // Number of links to file
+    uint64 size; // Size of file in bytes
+};
+```
+
+`fstat()`函数的功能是将文件描述符`fd`对应的文件状态信息复制到`st`结构体中。
+
+```c
+    if(strlen(path) + 1 + DIRSIZ + 1 > sizeof buf){
+        printf("find: path too long\n");
+        close(fd);
+        return -1;
+    }
+```
+
+在这个判断条件中，`strlen(path) + 1 + DIRSIZ + 1`表示的是`path`的长度加上一个`/`和`DIRSIZ`，`DIRSIZ`表示的是目录项名字的**最大长度**，再加上一个`\0`。
+
+> 判断中的两个`1`，分别代表将要插入的`/`和结束符`\0`。
+
+```c
+    short type = st.type;
+    if(type == T_FILE || type == T_DEVICE){
+        char *basename = _basename(path);
+        if(strcmp(name, basename) == 0){
+            fprintf(1, "%s\n", path);
+        }
+    }else if(type == T_DIR){
+        p = buf+strlen(buf);
+        *p++ = '/';
+        while(read(fd, &de, sizeof(de)) == sizeof(de)){
+            if(strcmp(de.name, ".") == 0 || strcmp(de.name, "..") == 0)
+                continue;
+            if(de.inum == 0)
+                continue;
+            memmove(p, de.name, DIRSIZ);
+            p[DIRSIZ] = 0;
+            if(stat(buf, &st) < 0){
+                fprintf(2, "find: connt stat %s\n", buf);
+                continue;
+            }
+            find(buf, name);
+        }
+    }
+```
+
+在这段代码中，我使用了`_basename()`用来获取路径里的文件名，然后进行判断是否是需要要查找的文件。
+
+这段代码的重点是对目录进行遍历，并调用`find()`函数进行递归查找。
+
+当我们进入`else`块中，`buf`中存放着我们的路径，我们将指针`p`指向`buf`的末尾，并添加一个`/`，准备在拼接新的路径并进行递归。
+
+在使用`read()`读取目录时，目录中的内容大概是这样的：
+
+```c
++-------------------------------+
+|   目录数据块 (存放 dirent[])  |
++-------------------------------+
+|  dirent:                      |
+|   inum = 5   name = "."       |
+|  dirent:                      |
+|   inum = 1   name = ".."      |
+|  dirent:                      |
+|   inum = 12  name = "foo.txt" |
+|  dirent:                      |   
+|   inum = 13  name = "bar"     |
+|  ...                          |   
++-------------------------------+ 
+```
+
+使用`while`配合`read(fd, &de, sizeof(de)) == sizeof(de)`会读出目录项，直到读完所有的目录项。
+
+在`read()`中每次读取目录项(内核使用`fd`索引对应的`file`结构体)，都会修改`file->off`，来记录偏移位置，直到读完所有的目录项。
+
+然后使用`memmove()`将读取目录项下的名字复制到`buf`中，并使用`p[DIRSIZ]`向`buf`中添加一个结束符。
+
+然后使用`stat()`将`buf`中存放的路径的文件信息保存到`st`中。
+
+最后进行递归调用
+
+### _basename()
+`_basename()`函数用于获取路径中的文件名。
+
+```c
+static char *_basename(char *path){
+    char *p;
+
+    for(p = path+strlen(path); p>=path && *p != '/'; --p);
+    ++p;
+    return p;
+}
+```
+
+`_basename()`函数的实现原理是：从路径的最后一个字符开始，逐个字符向前遍历，直到找到第一个斜杠（/）的位置，然后返回该位置之后的字符。
+
+## code
+
+```c
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+#include "kernel/fs.h"
+#include "kernel/fcntl.h"
+
+static char *_basename(char *path){
+    char *p;
+
+    for(p = path+strlen(path); p>=path && *p != '/'; --p);
+    ++p;
+    return p;
+}
+int find(char *path, char *name){
+    char buf[512], *p;
+    int fd;
+    struct dirent de;
+    struct stat st;
+
+    if((fd = open(path, O_RDONLY)) < 0){
+        fprintf(2, "find: cannot open %s\n", path);
+        return -1;
+    }
+
+    if(fstat(fd, &st) < 0){
+        fprintf(2, "find: cannot stat %s\n", path);
+        close(fd);
+        return -1;
+    }
+    if(strlen(path) + 1 + DIRSIZ + 1 > sizeof buf){
+        printf("find: path too long\n");
+        close(fd);
+        return -1;
+    }
+    strcpy(buf, path);
+    
+    short type = st.type;
+    if(type == T_FILE || type == T_DEVICE){
+        char *basename = _basename(path);
+        if(strcmp(name, basename) == 0){
+            fprintf(1, "%s\n", path);
+        }
+    }else if(type == T_DIR){
+        p = buf+strlen(buf);
+        *p++ = '/';
+        while(read(fd, &de, sizeof(de)) == sizeof(de)){
+            if(strcmp(de.name, ".") == 0 || strcmp(de.name, "..") == 0)
+                continue;
+            if(de.inum == 0)
+                continue;
+            memmove(p, de.name, DIRSIZ);
+            p[DIRSIZ] = 0;
+            if(stat(buf, &st) < 0){
+                fprintf(2, "find: connt stat %s\n", buf);
+                continue;
+            }
+            find(buf, name);
+        }
+    }
+    close(fd);
+    return 1;
+}
+
+int main(int argc, char *argv[]){
+    if(argc != 3){
+        fprintf(2, "Usage: find <path> <name>\n");
+        exit(0);
+    }
+    find(argv[1], argv[2]);
+    exit(0);
+    return 0;
+}
+```
 
