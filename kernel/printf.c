@@ -25,6 +25,9 @@ static struct {
 
 static char digits[] = "0123456789abcdef";
 
+void
+backtrace(void);
+
 static void
 printint(int xx, int base, int sign)
 {
@@ -122,6 +125,8 @@ panic(char *s)
   printf("panic: ");
   printf(s);
   printf("\n");
+  backtrace();
+  printf("\n");
   panicked = 1; // freeze uart output from other CPUs
   for(;;)
     ;
@@ -132,4 +137,26 @@ printfinit(void)
 {
   initlock(&pr.lock, "pr");
   pr.locking = 1;
+}
+
+void
+backtrace(void)
+{
+  // 读当前帧指针
+  uint64 fp = r_fp();
+
+  printf("backtrace:\n");
+
+  // 一页对齐的栈页；循环只在同一内核栈页内回溯
+  uint64 stackpage = PGROUNDDOWN(fp);
+
+  // 每个栈帧约定：return address 在 fp - 8, saved fp 在 fp - 16
+  while (fp && PGROUNDDOWN(fp) == stackpage) {
+    // 读 return address
+    uint64 ra = *(uint64*)(fp - 8);
+    printf("%p\n", ra);
+
+    // 读上一级的 frame pointer（saved fp）
+    fp = *(uint64*)(fp - 16);
+  }
 }
