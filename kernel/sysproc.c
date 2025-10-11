@@ -99,10 +99,18 @@ sys_sigalarm(void)
 {
   int interval;
   argint(0, &interval);
+
+  struct proc *p = myproc();
+
+  if(interval == 0){
+    p->interval = 0;
+    p->last_ticks = 0;
+    return 0;
+  }
   uint64 fn;
   argaddr(1, &fn);
 
-  struct proc *p = myproc();
+  
   p->interval = interval;
   p->handle_alarm = 0;
   p->last_ticks = 0;
@@ -113,5 +121,19 @@ sys_sigalarm(void)
 uint64
 sys_sigreturn(void)
 {
-  return 0;
+  struct proc* p = myproc();
+
+  // if no alarm is pending
+  if(!p->handle_alarm){
+    return -1;
+  }
+
+  // restore trapframe
+  *(p->trapframe) = p->alarm_tf_backup;
+
+  // set zero that can be used again
+  p->handle_alarm = 0;
+
+  uint64 a0 = p->trapframe->a0;
+  return a0;
 }
