@@ -303,6 +303,64 @@ uvmfree(pagetable_t pagetable, uint64 sz)
   freewalk(pagetable);
 }
 
+// helper: round down va to page base
+static inline uint64
+page_rounddown(uint64 va){
+  return va & ~(PGSIZE-1);
+}
+
+// handle COW for one page in the specified pagetable
+// returns 0 on success, -1 on failure
+int
+handle_cow(pagetable_t pagetable, uint64 va)
+{
+  pte_t *pte;
+  uint64 pa;
+  pte = walk(pagetable, va, 0);
+  if(pte == 0) return -1;
+  if(!(*pte & PTE_V)) return -1;
+  if(!(*pte & PTE_COW)){
+    return 0;
+  }
+
+  int oldflags = PTE_FLAGS(*pte);
+
+  pa = PTE2PA(*pte);
+  // if only one reference, we can just set PTE_W and clear PTE_COW
+  int refs = krefget(pa);
+  // printf("cow: refs %d\n", refs);
+  if(refs < 1){
+    return -1;
+  }
+
+  if(refs == 1){
+    // make it writable again: just clear COW and set W
+    int newflags = (oldflags & ~PTE_COW) | PTE_W;
+    *pte = PA2PTE(pa) | newflags;
+    sfence_vma(); // ensure TLB coherence (use appropriate function)
+    return 0;
+  }
+
+  // refs > 1: need to allocate a new page, copy, and install
+  char *mem = kalloc();
+  if(mem == 0){
+    return -1; // no memory
+  }
+
+  // copy old page content
+  memmove(mem, (char*)pa, PGSIZE);
+
+  // decrement refcount on old page
+  krefdec(pa);
+
+  uint64 newpa = (uint64)mem;
+  // install new mapping in this pagetable (make writable)
+  int newflags = (oldflags & ~PTE_COW) | PTE_W;
+  *pte = PA2PTE(newpa) | newflags;
+  sfence_vma();
+  return 0;
+}
+
 // Given a parent process's page table, copy
 // its memory into a child's page table.
 // Copies both the page table and the
@@ -315,7 +373,7 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
+  // char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
@@ -324,19 +382,26 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
       panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
-      goto err;
+
+    if(flags & PTE_W){
+      // clear write and set COW in parent pte
+      *pte = PA2PTE(pa) | (flags & (~PTE_W)) | PTE_COW;
+      // increment refcount for the shared page
+      krefinc(pa);
+
+      // map same physical pa in child's pagetable with COW and whitout W
+      if(mappages(new, i, PGSIZE, pa, (flags & (~PTE_W)) | PTE_COW) != 0){
+        // on failure: need to undo increments (not shown fully)
+        return -1;
+      }
+    }else{
+      krefinc(pa);
+      if(mappages(new, i, PGSIZE, pa, flags) != 0){
+        return -1;
+      }
     }
   }
   return 0;
-
- err:
-  uvmunmap(new, 0, i / PGSIZE, 1);
-  return -1;
 }
 
 // mark a PTE invalid for user access.
@@ -361,26 +426,42 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
   uint64 n, va0, pa0;
   pte_t *pte;
 
-  while(len > 0){
+  while (len > 0) {
     va0 = PGROUNDDOWN(dstva);
-    if(va0 >= MAXVA)
+    if (va0 >= MAXVA)
       return -1;
+
     pte = walk(pagetable, va0, 0);
-    if(pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0 ||
-       (*pte & PTE_W) == 0)
+    if (pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0)
       return -1;
+
+    // 🧠 如果是COW页，则先进行写时复制
+    if ((*pte & PTE_COW) && !(*pte & PTE_W)) {
+      if (handle_cow(pagetable, va0) < 0)
+        return -1;
+      // handle_cow 可能修改了页表，必须重新获取 pte
+      pte = walk(pagetable, va0, 0);
+      if (pte == 0)
+        return -1;
+    }
+
+    // 🧩 现在我们可以安全地写入用户页
     pa0 = PTE2PA(*pte);
     n = PGSIZE - (dstva - va0);
-    if(n > len)
+    if (n > len)
       n = len;
+
     memmove((void *)(pa0 + (dstva - va0)), src, n);
 
     len -= n;
     src += n;
     dstva = va0 + PGSIZE;
   }
+// test copyout: usertrap(): unexpected scause 0x000000000000000c pid=7
+//             sepc=0x0000000000056e70 stval=0x0000000000056e70
   return 0;
 }
+
 
 // Copy from user to kernel.
 // Copy len bytes to dst from virtual address srcva in a given page table.
