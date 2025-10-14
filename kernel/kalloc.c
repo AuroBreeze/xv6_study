@@ -165,7 +165,7 @@ krefdec(uint64 pa)
 int
 krefget(uint64 pa)
 {
-  uint64 idx = pa >> PGSHIFT;
+  uint64 idx = pa / PGSIZE;
   int v;
   acquire(&ref_lock);
   v = refcnt[idx];
