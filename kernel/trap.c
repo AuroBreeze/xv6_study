@@ -36,35 +36,33 @@ trapinithart(void)
 void
 usertrap(void)
 {
-    int which_dev = 0;
+  int which_dev = 0;
 
-    if((r_sstatus() & SSTATUS_SPP) != 0)
-        panic("usertrap: not from user mode");
+  if((r_sstatus() & SSTATUS_SPP) != 0)
+    panic("usertrap: not from user mode");
 
-    w_stvec((uint64)kernelvec);
+  // send interrupts and exceptions to kerneltrap(),
+  // since we're now in the kernel.
+  w_stvec((uint64)kernelvec);
 
-    struct proc *p = myproc();
-    p->trapframe->epc = r_sepc();
+  struct proc *p = myproc();
+  
+  // save user program counter.
+  p->trapframe->epc = r_sepc();
+  
+  if(r_scause() == 8){
+    // system call
 
-    uint64 scause = r_scause();
+    if(killed(p))
+      exit(-1);
 
-    if(scause == 8){
-        // system call
-        if(killed(p)) exit(-1);
-        p->trapframe->epc += 4;
-        intr_on();
-        syscall();
-    } 
-    else if(scause == 15 || scause == 13){
-        // store/AMO fault or load fault
-        uint64 fault_va = r_stval();
-        uint64 va = PGROUNDDOWN(fault_va);
+    // sepc points to the ecall instruction,
+    // but we want to return to the next instruction.
+    p->trapframe->epc += 4;
 
-        pte_t *pte = walk(p->pagetable, va, 0);
-        if(!pte || !(*pte & PTE_V) || !(*pte & PTE_U)){
-            setkilled(p);
-            goto out;
-        }
+    // an interrupt will change sepc, scause, and sstatus,
+    // so enable only now that we're done with those registers.
+    intr_on();
 
     syscall();
   }else if(r_scause() == 15 || r_scause() == 13){
@@ -95,12 +93,15 @@ usertrap(void)
     setkilled(p);
   }
 
-out:
-    if(killed(p)) exit(-1);
-    if(which_dev == 2) yield();
-    usertrapret();
-}
+  if(killed(p))
+    exit(-1);
 
+  // give up the CPU if this is a timer interrupt.
+  if(which_dev == 2)
+    yield();
+
+  usertrapret();
+}
 
 //
 // return to user space
