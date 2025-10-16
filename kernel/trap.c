@@ -65,11 +65,31 @@ usertrap(void)
     intr_on();
 
     syscall();
-  } else if((which_dev = devintr()) != 0){
+  }else if(r_scause() == 15 || r_scause() == 13){
+    // page fault or kernel access
+    uint64 va = r_stval();
+    if(is_cow_fault(p->pagetable, va)){
+      if(handle_cow_fault(p->pagetable, va) < 0){
+        printf("usertrap(): cow fault\n");
+        setkilled(p);
+      }
+    }else{
+      printf("usertrap(): page fault\n");
+      printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
+      printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
+      setkilled(p);
+    }
+
+  } 
+  else if((which_dev = devintr()) != 0){
     // ok
   } else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
+
+    printf("trap cause: scause=%p sepc=%p stval=%p in proc %s\n",
+    r_scause(), r_sepc(), r_stval(), p->name);
+
     setkilled(p);
   }
 

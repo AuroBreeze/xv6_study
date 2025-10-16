@@ -315,7 +315,7 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
+  // char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
@@ -323,14 +323,18 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
+    
+    *pte = (*pte & ~PTE_W);
+    *pte |= PTE_COW;
+
     flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
+      
+    if(mappages(new, i, PGSIZE, (uint64)pa, (flags & ~PTE_W) | PTE_COW) != 0){
+      kfree((void *)pa);
       goto err;
     }
+    sfence_vma();
+    incr((void *)pa);
   }
   return 0;
 
@@ -363,8 +367,14 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
-    if(va0 >= MAXVA)
-      return -1;
+    // pte = walk(pagetable, va0, 0);
+    if(is_cow_fault(pagetable, va0)){
+      if(handle_cow_fault(pagetable, va0) < 0 ){
+        // printf("uvmclear: cannot handle COW fault\n");
+        return -1;
+      }
+    }
+    sfence_vma();
     pte = walk(pagetable, va0, 0);
     if(pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0 ||
        (*pte & PTE_W) == 0)
@@ -379,6 +389,7 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
     src += n;
     dstva = va0 + PGSIZE;
   }
+
   return 0;
 }
 
@@ -448,4 +459,54 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+int 
+is_cow_fault(pagetable_t pagetable, uint64 va)
+{
+  if(va >= MAXVA)
+    return 0;
+  va = PGROUNDDOWN(va);
+  pte_t *pte = walk(pagetable, va, 0);
+
+
+  if(pte == 0)
+    return 0;
+  if((*pte & PTE_V) == 0)
+    return 0;
+  // if((*pte & PTE_U) == 0)
+  //   return 0;
+
+  if(*pte & PTE_COW)
+    return 1;
+  
+  return 0;
+}
+
+int
+handle_cow_fault(pagetable_t pagetable, uint64 va)
+{
+  va = PGROUNDDOWN(va);
+  pte_t *pte = walk(pagetable, va, 0);
+  uint64 pa = PTE2PA(*pte);
+  int flag = PTE_FLAGS(*pte);
+
+  char *mem = kalloc();
+  if(mem == 0){
+    return -1;
+  }
+
+  memmove(mem, (char *)pa, PGSIZE);
+
+  uvmunmap(pagetable, va, 1, 1);
+  flag = (flag & (~PTE_COW)) | PTE_W;
+  flag = flag & (PTE_R | PTE_W | PTE_X | PTE_U); // 过滤掉内部标志位
+
+  
+  if(mappages(pagetable, va, PGSIZE, (uint64)mem, flag) < 0){ 
+    kfree(mem);
+    return -1;
+  }
+  
+  return 0;
 }
