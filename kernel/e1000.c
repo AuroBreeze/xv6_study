@@ -95,11 +95,24 @@ e1000_init(uint32 *xregs)
 int
 e1000_transmit(struct mbuf *m)
 {
+  acquire(&e1000_lock);
+  uint32 idx = regs[E1000_TDT];
+  if (!(tx_ring[idx].status & E1000_TXD_STAT_DD )  ) {
+    printf("buffer overflow");
+    release(&e1000_lock);
+    return -1;
+  }else if(tx_mbufs[idx] != 0){
+    mbuffree(tx_mbufs[idx]);
+  }
+
+  tx_ring[idx].addr =(uint64)m->head;
+  tx_ring[idx].length = m->len;
+  tx_ring[idx].cmd = E1000_TXD_CMD_EOP | E1000_TXD_CMD_RS;
   //
-  // Your code here.
+  // your code here.
   //
   // the mbuf contains an ethernet frame; program it into
-  // the TX descriptor ring so that the e1000 sends it. Stash
+  // the tx descriptor ring so that the e1000 sends it. stash
   // a pointer so that it can be freed after sending.
   //
   
@@ -110,10 +123,10 @@ static void
 e1000_recv(void)
 {
   //
-  // Your code here.
+  // your code here.
   //
-  // Check for packets that have arrived from the e1000
-  // Create and deliver an mbuf for each packet (using net_rx()).
+  // check for packets that have arrived from the e1000
+  // create and deliver an mbuf for each packet (using net_rx()).
   //
 }
 
