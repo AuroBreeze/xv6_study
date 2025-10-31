@@ -97,6 +97,7 @@
 #define E1000_TXD_STAT_DD    0x00000001 /* Descriptor Done */
 
 // [E1000 3.3.3]
+// transmission descriptor
 struct tx_desc
 {
   uint64 addr;
