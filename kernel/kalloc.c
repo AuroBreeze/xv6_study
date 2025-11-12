@@ -100,13 +100,13 @@ static struct run *steal(int cid) {
     tail->next = kmem[cid].freelist;
     kmem[cid].freelist = r;
 
-    struct run *page = kmem[cid].freelist;
-    if(page){
-      kmem[cid].freelist = page->next;
+    // struct run *page = kmem[cid].freelist;
+    if(kmem[cid].freelist){
+      kmem[cid].freelist = r->next;
     }
     release(&kmem[cid].lock);
 
-    return page;
+    return r;
   }
   return 0;
 }
@@ -132,7 +132,7 @@ kalloc(void)
     release(&kmem[cid].lock);
     r = steal(cid); // r = kmem[target].freelist
     if (!r) {
-      return 0;
+      return 0; // 千万不要使用panic
     }
   }
 
