@@ -333,7 +333,60 @@ sys_open(void)
       end_op();
       return -1;
     }
+    // FOLLOW SYMBOLIC LINKS
+    int depth = 0;
+    char target[MAXPATH];
+
+    while(ip->type == T_SYMLINK && !(omode & O_NOFOLLOW)){
+      // read the target path
+      int len = readi(ip, 0, (uint64)target, 0, MAXPATH);
+      if(len <= 0){
+        iunlockput(ip);
+        end_op();
+        return -1;
+      }
+      target[len] = 0;
+
+      iunlockput(ip);
+
+      if(depth++ >= 10){   // prevent loops: a->b->a
+        end_op();
+        return -1;
+      }
+
+      ip = namei(target);
+      if(ip == 0){
+        end_op();
+        return -1;
+      }
+      ilock(ip);
+    }
   }
+  // if(ip->type == T_SYMLINK){
+  //   if(!(omode & O_NOFOLLOW)){
+  //     char target[MAXPATH];
+  //     readi(ip, 0, (uint64)target, 0, MAXPATH);
+  //     iunlockput(ip);
+  //
+  //     ip = namei(target);
+  //     if(ip == 0){
+  //       return -1;
+  //     }
+  //
+  //     ilock(ip);
+  //   }else{
+  //     struct inode *dip = ip;
+  //     uint8 cnt = 0;
+  //     while((dip->type == T_SYMLINK && cnt++ < 10) && dip != 0){
+  //       dip = namei(dip->targe_path);
+  //     }
+  //     if(dip->type != 0 && dip->type != T_SYMLINK && cnt != 10){
+  //       ip = dip;
+  //     }else{
+  //       return -1;
+  //     }
+  //   }
+  // }
 
   if(ip->type == T_DEVICE && (ip->major < 0 || ip->major >= NDEV)){
     iunlockput(ip);
@@ -501,5 +554,39 @@ sys_pipe(void)
     fileclose(wf);
     return -1;
   }
+  return 0;
+}
+
+uint64
+sys_symlink(void){
+  char target[MAXPATH], linkpath[MAXPATH];
+  if(argstr(0, target, MAXPATH)<0 || argstr(1, linkpath, MAXPATH)<0){
+    return -1;
+  }
+
+
+  begin_op();
+  struct inode *dip;
+
+  dip = create(linkpath, T_SYMLINK, 0, 0);
+
+  if(dip == 0){
+    end_op();
+    return -1;
+  }
+
+  int len = strlen(target);
+  if(writei(dip, 0, (uint64)target, 0, len) != len){
+    iunlockput(dip);
+    end_op();
+    return -1;
+  }
+
+  dip->size = len;
+  iupdate(dip);
+  iunlockput(dip);
+
+  end_op();
+
   return 0;
 }
