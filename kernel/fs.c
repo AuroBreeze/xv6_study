@@ -417,6 +417,54 @@ bmap(struct inode *ip, uint bn)
     return addr;
   }
 
+  bn -= NINDIRECT;
+if (bn < NINDIRECT * NINDIRECT) {
+  uint addr;
+  struct buf *bp, *bp2;
+  uint *a1, *a2;
+
+  // 第一级：ip->addrs[NDIRECT+1] 指向一级间接块
+  if ((addr = ip->addrs[NDIRECT+1]) == 0) {
+    addr = balloc(ip->dev);
+    if (addr == 0)
+      return 0;
+    ip->addrs[NDIRECT+1] = addr;
+  }
+
+  // 读一级间接块
+  bp = bread(ip->dev, addr);
+  a1 = (uint*)bp->data;
+
+  uint idx1 = bn / NINDIRECT;   // 一级索引
+  uint idx2 = bn % NINDIRECT;   // 二级索引
+
+  // 第二级：如果还没有对应的二级间接块，就分配
+  if ((addr = a1[idx1]) == 0) {
+    addr = balloc(ip->dev);
+    if (addr == 0) {
+      brelse(bp);
+      return 0;
+    }
+    a1[idx1] = addr;
+    log_write(bp);
+  }
+  brelse(bp);
+
+  // 读二级间接块
+  bp2 = bread(ip->dev, addr);
+  a2 = (uint*)bp2->data;
+
+  // 在二级间接块中找到数据块
+  if ((addr = a2[idx2]) == 0) {
+    addr = balloc(ip->dev);
+    if (addr) {
+      a2[idx2] = addr;
+      log_write(bp2);
+    }
+  }
+  brelse(bp2);
+  return addr;
+}
   panic("bmap: out of range");
 }
 
@@ -448,6 +496,28 @@ itrunc(struct inode *ip)
     ip->addrs[NDIRECT] = 0;
   }
 
+  if(ip->addrs[NDIRECT+1]){
+    bp = bread(ip->dev, ip->addrs[NDIRECT+1]);
+    a = (uint*)bp->data;
+    struct buf *bs;
+    for(j = 0; j < 256; j++){
+      if(a[j]){
+        bs = bread(ip->dev, a[j]);
+        uint *b = (uint*)bs->data;
+        for(int k=0; k < 256; k++){
+          if(b[k]){
+            bfree(ip->dev, b[k]);
+          }
+        }
+        brelse(bs);
+        bfree(ip->dev, a[j]);
+        a[j] = 0;
+      }
+    }
+    brelse(bp);
+    bfree(ip->dev, ip->addrs[NDIRECT+1]);
+    ip->addrs[NDIRECT+1] = 0;
+  }
   ip->size = 0;
   iupdate(ip);
 }
